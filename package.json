@@ -13,6 +13,6 @@
   "author": "David Chang",
   "license": "MIT",
   "dependencies": {
-    "babel-plugin-dotenv": "file:./babel-plugin-dotenv"
+    "@bitscheme/babel-plugin-dotenv": "0.1.1"
   }
 }
