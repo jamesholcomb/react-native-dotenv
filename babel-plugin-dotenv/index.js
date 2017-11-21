@@ -1,51 +1,81 @@
-var dotEnv = require('dotenv');
-var fs = require('fs');
-var sysPath = require('path');
-var process = require('process');
+const dotEnv = require("dotenv")
+const sysPath = require("path")
+const process = require("process")
 
-module.exports = function (data) {
-    var t = data.types;
+module.exports = function(data) {
+  const t = data.types
 
-    return {
-        visitor: {
-            ImportDeclaration: function(path, state) {
-                var options = state.opts;
+  return {
+    visitor: {
+      ImportDeclaration: function(path, state) {
+        const options = state.opts
 
-                if (options.replacedModuleName === undefined)
-                  return;
+        if (options.replacedModuleName === undefined) return
 
-                var configDir = options.configDir ? options.configDir : './';
-                var configFile = options.filename ? options.filename : '.env';
+        const configDir = options.configDir ? options.configDir : "./"
+        const configFile = options.filename ? options.filename : ".env"
+        const env = process.env.BABEL_ENV || "development"
 
-                if (path.node.source.value === options.replacedModuleName) {
-                  var config = dotEnv.config({ path: sysPath.join(configDir, configFile), silent: true }) || {};
-                  var platformPath = (process.env.BABEL_ENV === 'development' || process.env.BABEL_ENV === undefined)
-                                          ? configFile + '.development'
-                                          : configFile + '.production';
-                  var config = Object.assign(config, dotEnv.config({ path: sysPath.join(configDir, platformPath), silent: true }));
+        if (path.node.source.value === options.replacedModuleName) {
+          const config = dotEnv.config({
+            path: sysPath.join(configDir, `${configFile}`),
+            silent: true
+          }) || {}
 
-                  path.node.specifiers.forEach(function(specifier, idx){
-                    if (specifier.type === "ImportDefaultSpecifier") {
-                      throw path.get('specifiers')[idx].buildCodeFrameError('Import dotenv as default is not supported.')
-                    }
-                    var importedId = specifier.imported.name
-                    var localId = specifier.local.name;
+          const envConfig = Object.assign({}, config, dotEnv.config({
+            path: sysPath.join(configDir, `${configFile}.${env}`),
+            silent: true
+          }))
 
-                    if(!config[importedId]) {
-                      throw path.get('specifiers')[idx].buildCodeFrameError('Try to import dotenv variable "' + importedId + '" which is not defined in any ' + configFile + ' files.')
-                    }
+          const iOSConfig = Object.assign({}, envConfig, dotEnv.config({
+            path: sysPath.join(configDir, `${configFile}.${env}.ios`),
+            silent: true
+          }))
 
-                    var binding = path.scope.getBinding(localId);
-                    binding.referencePaths.forEach(function(refPath){
-                      if (config[importedId]) {
-                        refPath.replaceWith(t.valueToNode(config[importedId]))
-                      }
-                    });
-                  })
+          const androidConfig = Object.assign({}, envConfig, dotEnv.config({
+            path: sysPath.join(configDir, `${configFile}.${env}.android`),
+            silent: true
+          }))
 
-                  path.remove();
-                }
+          path.node.specifiers.forEach(function(specifier, idx) {
+            if (specifier.type === "ImportDefaultSpecifier") {
+              throw path
+                .get("specifiers")
+                [idx].buildCodeFrameError("Default imports are not supported")
             }
+            const importedId = specifier.imported.name
+            const localId = specifier.local.name
+
+            if (!iOSConfig[importedId]) {
+              throw path
+                .get("specifiers")
+                [idx].buildCodeFrameError(
+                  `Import variable ${importedId} not found in any .env files`
+                )
+            }
+
+            if (!androidConfig[importedId]) {
+              throw path
+                .get("specifiers")
+                [idx].buildCodeFrameError(
+                  `Import variable ${importedId} not found`
+                )
+            }            
+
+            const binding = path.scope.getBinding(localId)
+            binding.referencePaths.forEach(function(refPath) {
+              if (iOSConfig[importedId] && androidConfig[importedId]) {
+                const val = `require("Platform").OS === "ios" ? "${iOSConfig[
+                  importedId
+                ]}" : "${androidConfig[importedId]}"`
+                refPath.replaceWithSourceString(val)
+              }
+            })
+          })
+
+          path.remove()
         }
+      }
     }
+  }
 }
